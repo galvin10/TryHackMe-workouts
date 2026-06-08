@@ -1,7 +1,7 @@
 # Detecting AD Initial Access
 
 **Platform:** TryHackMe
-**Date:** 2026-06-07
+**Date:** 2026-06-08
 
 ## Overview
 
