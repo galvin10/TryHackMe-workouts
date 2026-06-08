@@ -5,108 +5,208 @@
 
 ## Overview
 
-This room focused on detecting the early stages of attacker activity within an Active Directory environment. The emphasis was on identifying authentication anomalies, suspicious account activity, and common indicators that attackers have gained initial access to the domain.
+This room focused on detecting initial access attempts against Active Directory-connected services such as IIS web applications, Exchange OWA, and VPN gateways. Although the attacks target different services, they all ultimately authenticate against Active Directory, making them potential entry points into the domain.
 
-## Concepts Learned
+## Key Concepts
 
-### Initial Access in Active Directory
+### Active Directory as a Central Authentication System
 
-Initial access refers to the first successful compromise of an account or system within an AD environment. Common techniques include:
+Unlike standalone servers, applications connected to Active Directory share the same authentication source. Compromising one service can provide access to broader domain resources.
 
-* Phishing attacks
-* Password spraying
-* Credential stuffing
-* Exploitation of vulnerable services
-* Abuse of weak passwords
+Common entry points:
 
----
-
-### Authentication Monitoring
-
-Important authentication-related events:
-
-| Event ID | Description                         |
-| -------- | ----------------------------------- |
-| 4624     | Successful logon                    |
-| 4625     | Failed logon                        |
-| 4768     | Kerberos TGT request                |
-| 4769     | Kerberos service ticket request     |
-| 4771     | Kerberos pre-authentication failure |
-| 4776     | NTLM authentication                 |
+* IIS-hosted applications
+* Exchange OWA
+* VPN gateways
+* SharePoint
+* ADFS
 
 ---
 
-### Password Spraying Detection
+### IIS Authentication
+
+When users authenticate through an IIS application:
+
+* IIS logs HTTP requests
+* Windows Security logs record authentication events
+* Domain Controllers validate credentials
+
+Relevant Events:
+
+| Event ID | Description           |
+| -------- | --------------------- |
+| 4624     | Successful Logon      |
+| 4625     | Failed Logon          |
+| 4776     | Credential Validation |
+
+---
+
+### IIS Log Fields
+
+Important fields during investigations:
+
+| Field        | Purpose                  |
+| ------------ | ------------------------ |
+| c-ip         | Client IP Address        |
+| cs-uri-stem  | Requested Resource       |
+| cs-uri-query | Query Parameters         |
+| cs-method    | HTTP Method              |
+| sc-status    | HTTP Status Code         |
+| User-Agent   | Browser/Tool Information |
+
+---
+
+### Web Shell Detection
 
 Indicators:
 
-* Multiple failed logons across many accounts
-* Same source IP targeting different users
-* Large numbers of Event ID 4625 entries
+* Large numbers of HTTP 404 responses
+* Requests to unusual `.aspx` files
+* Suspicious query strings
+* POST requests to unexpected directories
 
-Detection focus:
-
-* Failed login volume
-* Source IP analysis
-* Authentication trends
-
----
-
-### Kerberos-Based Activity
-
-Kerberos authentication generates:
+Common web shell location:
 
 ```text
-4768 → TGT Request
-4769 → TGS Request
-4624 → Successful Logon
+/aspnet_client/
 ```
 
-Monitoring abnormal ticket requests can help identify compromised accounts and suspicious activity.
+Suspicious process activity:
+
+```text
+w3wp.exe -> cmd.exe
+w3wp.exe -> powershell.exe
+```
+
+This is a strong indicator of web shell execution.
 
 ---
 
-### Account Monitoring
+### Exchange OWA Attacks
 
-Watch for:
+Important Exchange paths:
 
-* Newly created accounts
-* Privileged account usage
-* Unusual login times
-* Authentication from unfamiliar systems
+| Path | Purpose                |
+| ---- | ---------------------- |
+| /owa | Outlook Web Access     |
+| /ecp | Exchange Control Panel |
 
-Relevant events:
+Signs of brute-force activity:
 
-| Event ID | Description              |
-| -------- | ------------------------ |
-| 4720     | Account created          |
-| 4722     | Account enabled          |
-| 4724     | Password reset attempted |
-| 4740     | Account locked out       |
+* Multiple POST requests to `/owa/auth.owa`
+* Numerous Event ID 4625 failures
+* Successful Event ID 4624 after repeated failures
+
+---
+
+### Password Spraying vs Brute Force
+
+#### Password Spraying
+
+* One password
+* Many accounts
+
+Example:
+
+```text
+user1 : Spring2025!
+user2 : Spring2025!
+user3 : Spring2025!
+```
+
+#### Brute Force
+
+* One account
+* Many passwords
+
+Example:
+
+```text
+admin : Password1
+admin : Password2
+admin : Password3
+```
+
+Understanding the difference is important during investigations.
+
+---
+
+### VPN Authentication
+
+Most enterprise VPN solutions authenticate users against Active Directory through RADIUS and NPS (Network Policy Server).
+
+Authentication Flow:
+
+```text
+VPN Gateway
+    ↓
+NPS (RADIUS)
+    ↓
+Active Directory
+```
+
+Relevant NPS Events:
+
+| Event ID | Description       |
+| -------- | ----------------- |
+| 6272     | Access Granted    |
+| 6273     | Access Denied     |
+| 6274     | Request Discarded |
+
+---
+
+### Important NPS Reason Codes
+
+| Code | Meaning                      |
+| ---- | ---------------------------- |
+| 16   | Invalid Username or Password |
+| 48   | User Not Authorized          |
+| 65   | Shared Secret Mismatch       |
+
+Reason Code 16 may indicate credential attacks.
 
 ---
 
 ## SOC Analyst Notes
 
-When investigating potential initial access:
+### Indicators of Initial Access
 
-* Establish a baseline of normal authentication behavior.
-* Investigate spikes in failed logons.
-* Correlate authentication events across systems.
-* Pay attention to privileged account activity.
-* Monitor unusual source hosts and login locations.
+* Large numbers of failed authentication attempts
+* Authentication outside normal business hours
+* Logins from unusual IP addresses
+* Web shell deployment
+* Successful logins following repeated failures
+* Access to administrative interfaces such as `/ecp`
+* VPN authentication anomalies
+
+### Correlation Matters
+
+A complete investigation often requires multiple log sources:
+
+* IIS Logs
+* Windows Security Logs
+* Sysmon Logs
+* NPS Logs
+
+A single event rarely tells the full story.
+
+### Useful Logon Types
+
+| Logon Type | Meaning                            |
+| ---------- | ---------------------------------- |
+| 3          | Network Logon                      |
+| 8          | NetworkCleartext (Common with IIS) |
+
+These can help identify the source of authentication activity.
 
 ---
 
 ## Key Takeaways
 
-* Initial access often begins with credential abuse.
-* Authentication logs provide critical visibility.
-* Password spraying creates recognizable patterns.
-* Kerberos and NTLM events are valuable investigation sources.
-* Event correlation is more effective than analyzing isolated events.
-* Early detection can prevent lateral movement and privilege escalation.
-
-## Personal Notes
-
-This room reinforced the importance of monitoring authentication activity and account behavior to detect attackers during the earliest stages of an Active Directory compromise.
+* IIS, Exchange, and VPN gateways are common AD initial access targets.
+* IIS logs provide visibility that Windows Security logs cannot.
+* Web shells often reveal themselves through unusual `.aspx` files and `w3wp.exe` child processes.
+* OWA brute-force attacks generate identifiable authentication patterns.
+* VPN attacks can be detected using NPS Events 6272 and 6273.
+* Successful compromise often appears as multiple failures followed by a successful authentication.
+* Correlating application logs with Windows Security events provides the clearest picture of attacker activity.
